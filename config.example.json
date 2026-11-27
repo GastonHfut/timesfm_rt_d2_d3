@@ -1,0 +1,17 @@
+{
+  "source": {
+    "host": "服务器地址",
+    "port": 3306,
+    "database": "ai_epf_platform",
+    "user": "数据库用户名",
+    "password": "填写密码"
+  },
+  "local": {
+    "host": "127.0.0.1",
+    "port": 3306,
+    "database": "timesfm_rt_forecast",
+    "user": "root",
+    "password": "填写密码"
+  },
+  "result_target": "source"
+}
