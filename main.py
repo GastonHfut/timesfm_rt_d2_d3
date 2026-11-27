@@ -39,8 +39,8 @@ def main():
 
     def query(sql,params):
         cur=conn.cursor();cur.execute(sql,params); rows=cur.fetchall();columns=[c[0] for c in cur.description];cur.close();return pd.DataFrame(rows,columns=columns)
-    hi=pd.date_range(end=origin,periods=1440,freq='h')
-    prices=query('SELECT data_time,price_realtime FROM epf_market_data WHERE data_time BETWEEN %s AND %s',(hi[0].to_pydatetime(),origin.to_pydatetime()))
+    hi=pd.date_range(end=day,periods=1440,freq='h')
+    prices=query('SELECT data_time,price_realtime FROM epf_market_data WHERE data_time BETWEEN %s AND %s',(hi[0].to_pydatetime(),hi[-1].to_pydatetime()))
     prices['data_time']=pd.to_datetime(prices.data_time);prices=prices.set_index('data_time').sort_index();assert not prices.index.duplicated().any()
     y=prices.reindex(hi).price_realtime.to_numpy(dtype=float)
     if not np.isfinite(y).all():raise ValueError('Missing hourly realtime prices in 60-day history')
@@ -54,9 +54,11 @@ def main():
     w=w[w.city_en.isin(helpers.CITIES)].copy()
     for col in helpers.FIELDS:w[col]=pd.to_numeric(w[col],errors='coerce')
     w=w.dropna(subset=list(helpers.FIELDS));w['available_at']=w[['forecast_issued_at','created_at','updated_at']].max(axis=1)
-    w=w.sort_values(['city_en','datetime','forecast_issued_at','available_at']).drop_duplicates(['city_en','datetime'],keep='last')
-    hist=w.groupby('datetime')[list(helpers.FIELDS)].mean();earliest=w.datetime.min()
-    future=w[w.available_at<=origin].groupby('datetime')[list(helpers.FIELDS)].mean()
+    w=w.sort_values(['city_en','datetime','forecast_issued_at','available_at'])
+    historical=w.drop_duplicates(['city_en','datetime'],keep='last')
+    hist=historical.groupby('datetime')[list(helpers.FIELDS)].mean();earliest=historical.datetime.min()
+    future_records=w[w.available_at<=w.datetime.clip(upper=origin)].drop_duplicates(['city_en','datetime'],keep='last')
+    future=future_records.groupby('datetime')[list(helpers.FIELDS)].mean()
     sys.path.insert(0,str(PROJECT_DIR/'vendor'));os.environ.setdefault('JAX_PLATFORMS','cpu')
     import timesfm
     mod=sys.modules['timesfm.timesfm_2p5.timesfm_2p5_torch'];old=mod.hf_hub_download;mod.hf_hub_download=lambda *a,**kw:None if kw.get('force_download') else old(*a,**kw)
@@ -65,7 +67,7 @@ def main():
     model.compile(timesfm.ForecastConfig(max_context=480,max_horizon=128,normalize_inputs=True,use_continuous_quantile_head=True,force_flip_invariance=True,infer_is_positive=False,fix_quantile_crossing=True,return_backcast=True))
     out=[]
     for lead in (2,3):
-        target=day+pd.Timedelta(days=lead);fi=pd.date_range(start=origin+pd.Timedelta(hours=1),end=target+pd.Timedelta(days=1),freq='h');weekend=origin.weekday() in (5,6) or (origin.weekday()==4 and lead==3)
+        target=day+pd.Timedelta(days=lead);fi=pd.date_range(start=day+pd.Timedelta(hours=1),end=target+pd.Timedelta(days=1),freq='h');weekend=origin.weekday() in (5,6) or (origin.weekday()==4 and lead==3)
         for first in (1,9,17):
             hm=helpers.selected(hi,first);fm=helpers.selected(fi,first);hs=hi[hm];fs=fi[fm];ys=y[hm];xh=features.reindex(hs).to_numpy(float);xf=features.reindex(fs).to_numpy(float)
             cov,_=helpers.make_covariates(xh,xf,first,8,hs,fs)

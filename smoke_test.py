@@ -8,13 +8,16 @@ ROOT=Path(__file__).resolve().parent
 sys.path.insert(0,str(ROOT))
 os.environ.update(SOURCE_DB_HOST='fixture',SOURCE_DB_USER='fixture',SOURCE_DB_PASSWORD='fixture',SOURCE_DB_NAME='fixture',LOCAL_DB_PASSWORD='fixture')
 day=pd.Timestamp('2025-01-03');origin=day+pd.Timedelta(hours=14)
-hi=pd.date_range(end=origin,periods=1440,freq='h')
+hi=pd.date_range(end=day,periods=1440,freq='h')
 times=pd.date_range(hi[0]-pd.Timedelta(hours=1),day+pd.Timedelta(days=4),freq='h')
 written=[]
 
 class Cursor:
     def execute(self,sql,params=None):
         if 'FROM epf_market_data' in sql:
+            assert pd.Timestamp(params[0]) == hi[0]
+            assert pd.Timestamp(params[1]) == day
+            assert len(hi) == 1440 and hi[-1] == day
             self.description=[('data_time',),('price_realtime',)];self.rows=[(t.to_pydatetime(),float(300+30*np.sin(i/24))) for i,t in enumerate(hi)]
         elif 'FROM a1_weekly_forecast' in sql:
             self.description=[(x,) for x in ('market_date','period_no','forecast_grid_load','forecast_dispatch_load','forecast_renewable_generation')]
