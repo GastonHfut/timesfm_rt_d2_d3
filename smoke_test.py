@@ -23,6 +23,8 @@ class Cursor:
             self.description=[(x,) for x in ('market_date','period_no','forecast_grid_load','forecast_dispatch_load','forecast_renewable_generation')]
             self.rows=[(d.date(),i,60000+i*5,50000+i*3,10000+i*2) for d in pd.date_range(hi[0].normalize()-pd.Timedelta(days=1),day+pd.Timedelta(days=3)) for i in range(1,97)]
         elif 'FROM hourly_weather_forecast' in sql:
+            assert params[2] == params[3] == params[4]
+            assert abs((pd.Timestamp.now()-pd.Timestamp(params[2])).total_seconds()) < 120
             names=('city_en','datetime','forecast_issued_at','created_at','updated_at','model_name','temperature_2m','precipitation','wind_speed_10m','shortwave_radiation')
             self.description=[(x,) for x in names];t=(origin-pd.Timedelta(days=4)).to_pydatetime()
             self.rows=[('Jinan',x.to_pydatetime(),t,t,t,'fixture',10+np.sin(i/24),0.,3.,100.) for i,x in enumerate(times)]

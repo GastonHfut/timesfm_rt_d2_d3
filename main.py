@@ -32,8 +32,8 @@ def load_db_config(path):
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--date',default=None);args=parser.parse_args()
-    day=pd.Timestamp(args.date or pd.Timestamp.now().date()).normalize();origin=day+pd.Timedelta(hours=14)
-    if pd.Timestamp.now()<origin: raise ValueError('Prediction time must be after D 14:00')
+    weather_asof=pd.Timestamp.now()
+    day=pd.Timestamp(args.date or weather_asof.date()).normalize()
     cfg=load_db_config(PROJECT_DIR/'config.local.json')
     conn=mysql.connector.connect(**cfg['source'])
 
@@ -49,7 +49,7 @@ def main():
     for f in helpers.FEATURES:a[f]=pd.to_numeric(a[f],errors='coerce')
     g=a.groupby(['market_date','hour'])[helpers.FEATURES];features=g.mean().where(g.count()==4);features.index=pd.DatetimeIndex([d+pd.Timedelta(hours=int(h)) for d,h in features.index]);features=features.sort_index()
     columns=','.join('`'+x+'`' for x in helpers.READ_COLS)
-    w=query('SELECT '+columns+' FROM hourly_weather_forecast WHERE datetime BETWEEN %s AND %s AND forecast_issued_at<=%s AND created_at<=%s AND updated_at<=%s',((hi[0]-pd.Timedelta(hours=1)).to_pydatetime(),(day+pd.Timedelta(days=4)).to_pydatetime(),origin.to_pydatetime(),origin.to_pydatetime(),origin.to_pydatetime()));conn.close()
+    w=query('SELECT '+columns+' FROM hourly_weather_forecast WHERE datetime BETWEEN %s AND %s AND forecast_issued_at<=%s AND created_at<=%s AND updated_at<=%s',((hi[0]-pd.Timedelta(hours=1)).to_pydatetime(),(day+pd.Timedelta(days=4)).to_pydatetime(),weather_asof.to_pydatetime(),weather_asof.to_pydatetime(),weather_asof.to_pydatetime()));conn.close()
     for col in ['datetime','forecast_issued_at','created_at','updated_at']:w[col]=pd.to_datetime(w[col])
     w=w[w.city_en.isin(helpers.CITIES)].copy()
     for col in helpers.FIELDS:w[col]=pd.to_numeric(w[col],errors='coerce')
@@ -57,7 +57,7 @@ def main():
     w=w.sort_values(['city_en','datetime','forecast_issued_at','available_at'])
     historical=w.drop_duplicates(['city_en','datetime'],keep='last')
     hist=historical.groupby('datetime')[list(helpers.FIELDS)].mean();earliest=historical.datetime.min()
-    future_records=w[w.available_at<=w.datetime.clip(upper=origin)].drop_duplicates(['city_en','datetime'],keep='last')
+    future_records=w[w.available_at<=w.datetime.clip(upper=weather_asof)].drop_duplicates(['city_en','datetime'],keep='last')
     future=future_records.groupby('datetime')[list(helpers.FIELDS)].mean()
     sys.path.insert(0,str(PROJECT_DIR/'vendor'));os.environ.setdefault('JAX_PLATFORMS','cpu')
     import timesfm
@@ -67,7 +67,7 @@ def main():
     model.compile(timesfm.ForecastConfig(max_context=480,max_horizon=128,normalize_inputs=True,use_continuous_quantile_head=True,force_flip_invariance=True,infer_is_positive=False,fix_quantile_crossing=True,return_backcast=True))
     out=[]
     for lead in (2,3):
-        target=day+pd.Timedelta(days=lead);fi=pd.date_range(start=day+pd.Timedelta(hours=1),end=target+pd.Timedelta(days=1),freq='h');weekend=origin.weekday() in (5,6) or (origin.weekday()==4 and lead==3)
+        target=day+pd.Timedelta(days=lead);fi=pd.date_range(start=day+pd.Timedelta(hours=1),end=target+pd.Timedelta(days=1),freq='h');weekend=day.weekday() in (5,6) or (day.weekday()==4 and lead==3)
         for first in (1,9,17):
             hm=helpers.selected(hi,first);fm=helpers.selected(fi,first);hs=hi[hm];fs=fi[fm];ys=y[hm];xh=features.reindex(hs).to_numpy(float);xf=features.reindex(fs).to_numpy(float)
             cov,_=helpers.make_covariates(xh,xf,first,8,hs,fs)
@@ -85,7 +85,7 @@ def main():
             if cov:pred,_=model.forecast_with_covariates(inputs=[ys.astype(np.float32)],dynamic_numerical_covariates=cov,xreg_mode='xreg + timesfm',normalize_xreg_target_per_input=True,ridge=1e-2,force_on_cpu=True)
             else:pred,_=model.forecast(horizon=len(fs),inputs=[ys.astype(np.float32)])
             values=np.asarray(pred[0])[-8:];assert len(values)==8 and np.isfinite(values).all()
-            for n,v in enumerate(values):out.append((day.date(),(target+pd.Timedelta(hours=first+n)).to_pydatetime(),float(v),'timesfm25_60d_8h',f'D+{lead}; hour={first+n}; weather={int(use_weather)}; price_only={int(not cov)}'))
+            for n,v in enumerate(values):out.append((day.date(),(target+pd.Timedelta(hours=first+n)).to_pydatetime(),float(v),'timesfm25_60d_8h',f'D+{lead}; hour={first+n}; weather={int(use_weather)}; price_only={int(not cov)}; weather_asof={weather_asof:%Y-%m-%d %H:%M:%S}'))
     assert len(out)==48 and len({v[1] for v in out})==48
     local=mysql.connector.connect(**cfg[cfg['result_target']])
     try:
